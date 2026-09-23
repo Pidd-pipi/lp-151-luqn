@@ -1,0 +1,2 @@
+-- 占位迁移说明：实际表结构由 GORM AutoMigrate 生成。
+-- 如需手写 SQL，请参考 model 包中 GORM 模型定义。

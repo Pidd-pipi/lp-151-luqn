@@ -1,0 +1,95 @@
+name: gbtreehole
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ${COMPOSE_PROJECT_NAME:-gbtreehole}-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gbtreehole}
+      MYSQL_USER: ${MYSQL_USER:-gbtreehole}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gbtreehole123}
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "${MYSQL_PORT:-57401}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-root123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - treehole
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-gbtreehole}-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-57411}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - treehole
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ${COMPOSE_PROJECT_NAME:-gbtreehole}-backend
+    environment:
+      APP_ENV: production
+      BACKEND_PORT: "8080"
+      JWT_SECRET: ${JWT_SECRET:-gbtreehole-dev-secret-change-me}
+      JWT_EXPIRE_MIN: ${JWT_EXPIRE_MIN:-10080}
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: ${MYSQL_USER:-gbtreehole}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-gbtreehole123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-gbtreehole}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      FRONTEND_URL: http://localhost:${FRONTEND_PORT:-18401}
+    ports:
+      - "${BACKEND_PORT:-19401}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - treehole
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ${COMPOSE_PROJECT_NAME:-gbtreehole}-frontend
+    ports:
+      - "${FRONTEND_PORT:-18401}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - treehole
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  treehole:
+    driver: bridge

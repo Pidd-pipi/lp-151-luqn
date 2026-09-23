@@ -1,0 +1,249 @@
+openapi: 3.0.3
+info:
+  title: 匿名树洞社区 API
+  version: 1.0.0
+  description: 匿名发帖/评论、话题标签、点赞热度、每日精选、敏感词审核
+servers:
+  - url: http://localhost:19401
+paths:
+  /healthz:
+    get:
+      summary: 健康检查
+      responses:
+        '200':
+          description: ok
+  /api/v1/auth/identities:
+    post:
+      summary: 创建匿名身份
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: { type: string }
+                avatar: { type: string }
+      responses:
+        '200':
+          description: 身份与 token
+  /api/v1/auth/login:
+    post:
+      summary: 使用身份密钥登录
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityKey]
+              properties:
+                identityKey: { type: string }
+      responses:
+        '200':
+          description: 身份与 token
+  /api/v1/posts:
+    get:
+      summary: 最新/标签/精选帖子列表
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+        - in: query
+          name: tag_id
+          schema: { type: integer }
+        - in: query
+          name: featured
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: 分页帖子列表
+    post:
+      summary: 发布帖子
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                title: { type: string }
+                content: { type: string }
+                images: { type: array, items: { type: string } }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 帖子与命中信息
+  /api/v1/posts/hot:
+    get:
+      summary: 热门帖子
+      responses:
+        '200':
+          description: 帖子数组
+  /api/v1/posts/featured:
+    get:
+      summary: 每日精选
+      responses:
+        '200':
+          description: 帖子数组
+  /api/v1/posts/{id}:
+    get:
+      summary: 帖子详情
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 帖子详情
+  /api/v1/posts/{id}/comments:
+    get:
+      summary: 帖子评论列表
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 分页评论列表
+  /api/v1/comments:
+    post:
+      summary: 发表评论
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [postId, content]
+              properties:
+                postId: { type: integer }
+                content: { type: string }
+      responses:
+        '200':
+          description: 评论与命中信息
+  /api/v1/tags:
+    get:
+      summary: 标签列表
+      responses:
+        '200':
+          description: 标签数组
+    post:
+      summary: 创建标签
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '200':
+          description: 标签
+  /api/v1/likes/toggle:
+    post:
+      summary: 点赞/取消点赞
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetType, targetId]
+              properties:
+                targetType: { type: string, enum: [post, comment] }
+                targetId: { type: integer }
+      responses:
+        '200':
+          description: 点赞结果
+  /api/v1/admin/reviews:
+    get:
+      summary: 审核队列
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 审核队列
+  /api/v1/admin/reviews/action:
+    post:
+      summary: 审核放行/屏蔽
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [queueId, action]
+              properties:
+                queueId: { type: integer }
+                action: { type: string, enum: [approve, reject] }
+                note: { type: string }
+      responses:
+        '200':
+          description: 审核结果
+  /api/v1/admin/sensitive-words:
+    get:
+      summary: 敏感词列表
+      responses:
+        '200':
+          description: 敏感词数组
+    post:
+      summary: 新增敏感词
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [word]
+              properties:
+                word: { type: string }
+      responses:
+        '200':
+          description: 敏感词
+  /api/v1/admin/sensitive-words/{id}:
+    delete:
+      summary: 删除敏感词
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: ok
+  /api/v1/admin/feature:
+    post:
+      summary: 手动推荐/取消推荐
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [postId, featured]
+              properties:
+                postId: { type: integer }
+                featured: { type: boolean }
+      responses:
+        '200':
+          description: ok
+  /api/v1/admin/tags:
+    get:
+      summary: 标签维护
+      responses:
+        '200':
+          description: 标签数组
