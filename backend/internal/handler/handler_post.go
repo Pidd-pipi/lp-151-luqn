@@ -49,6 +49,67 @@ func (h *PostHandler) CreatePost(c *gin.Context) {
 	OK(c, gin.H{"post": resp, "blocked": blocked, "hitWords": hits})
 }
 
+// UpdatePost 编辑自己的帖子
+// @Summary 编辑帖子（仅作者）
+// @Tags post
+// @Accept json
+// @Produce json
+// @Param id path int true "帖子ID"
+// @Param request body dto.UpdatePostRequest true "帖子内容"
+// @Success 200 {object} Response
+// @Router /api/v1/posts/{id} [put]
+func (h *PostHandler) UpdatePost(c *gin.Context) {
+	id := parseID(c)
+	if id == 0 {
+		return
+	}
+	identityID := c.GetUint("identityId")
+	var req dto.UpdatePostRequest
+	if !BindAndValidate(c, &req) {
+		return
+	}
+	post, hits, blocked, err := h.posts.Update(identityID, id, req.Title, req.Content, req.Images, req.Tags)
+	if err != nil {
+		h.writePostManageError(c, err, "update post")
+		return
+	}
+	OK(c, gin.H{"post": toPostResponse(post, false), "blocked": blocked, "hitWords": hits})
+}
+
+// WithdrawPost 撤回自己的帖子
+// @Summary 撤回帖子（仅作者）
+// @Tags post
+// @Produce json
+// @Param id path int true "帖子ID"
+// @Success 200 {object} Response
+// @Router /api/v1/posts/{id} [delete]
+func (h *PostHandler) WithdrawPost(c *gin.Context) {
+	id := parseID(c)
+	if id == 0 {
+		return
+	}
+	if err := h.posts.Withdraw(c.GetUint("identityId"), id); err != nil {
+		h.writePostManageError(c, err, "withdraw post")
+		return
+	}
+	OK(c, nil)
+}
+
+// writePostManageError 将编辑/撤回的业务错误映射为标准响应。
+func (h *PostHandler) writePostManageError(c *gin.Context, err error, op string) {
+	switch {
+	case errors.Is(err, service.ErrPostNotFound):
+		Fail(c, http.StatusNotFound, constants.CodeNotFound, "post not found")
+	case errors.Is(err, service.ErrForbidden):
+		Fail(c, http.StatusForbidden, constants.CodeForbidden, "只能操作自己的帖子")
+	case errors.Is(err, service.ErrPostWithdrawn):
+		Fail(c, http.StatusConflict, constants.CodeConflict, "post already withdrawn")
+	default:
+		h.logger.Error(op, "error", err)
+		Fail(c, http.StatusInternalServerError, constants.CodeInternal, op+" failed")
+	}
+}
+
 // ListPosts 最新/标签/精选帖子列表
 // @Summary 帖子列表
 // @Tags post
@@ -102,8 +163,15 @@ func (h *PostHandler) GetPost(c *gin.Context) {
 		Fail(c, http.StatusInternalServerError, constants.CodeInternal, "get post failed")
 		return
 	}
+	identityID := c.GetUint("identityId")
+	// 已撤回的帖子对所有人不可见；待审/未通过的帖子仅作者本人可见（用于查看处理状态）
+	if post.Status == constants.PostStatusWithdrawn ||
+		(post.Status != constants.PostStatusPublished && post.IdentityID != identityID) {
+		Fail(c, http.StatusNotFound, constants.CodeNotFound, "post not found")
+		return
+	}
 	_ = h.posts.IncrementView(id)
-	resp := toPostResponse(post, c.GetUint("identityId") > 0 && h.isLiked(c.GetUint("identityId"), "post", id))
+	resp := toPostResponse(post, identityID > 0 && h.isLiked(identityID, "post", id))
 	OK(c, resp)
 }
 

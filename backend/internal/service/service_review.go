@@ -100,6 +100,10 @@ func (s *reviewService) approveTarget(targetType string, targetID uint) error {
 			}
 			return err
 		}
+		// 仅处理待审内容：作者撤回或已变更的内容不被审核结果复活
+		if post.Status != constants.PostStatusPending {
+			return nil
+		}
 		post.Status = constants.PostStatusPublished
 		post.UpdatedAt = time.Now()
 		return s.posts.Update(post)
@@ -111,9 +115,26 @@ func (s *reviewService) approveTarget(targetType string, targetID uint) error {
 			}
 			return err
 		}
+		if comment.Status != constants.CommentStatusPending {
+			return nil
+		}
 		comment.Status = constants.CommentStatusPublished
 		comment.UpdatedAt = time.Now()
-		return s.comments.Update(comment)
+		if err := s.comments.Update(comment); err != nil {
+			return err
+		}
+		// 评论转为可见，帖子评论数同步增加
+		post, err := s.posts.FindByID(comment.PostID)
+		if err != nil {
+			s.logger.Error("find post for comment count", "error", err)
+			return nil
+		}
+		post.CommentCount++
+		post.UpdatedAt = time.Now()
+		if err := s.posts.Update(post); err != nil {
+			s.logger.Error("update post comment count", "error", err)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unknown target type: %s", targetType)
 	}
@@ -129,6 +150,9 @@ func (s *reviewService) rejectTarget(targetType string, targetID uint) error {
 			}
 			return err
 		}
+		if post.Status != constants.PostStatusPending {
+			return nil
+		}
 		post.Status = constants.PostStatusRejected
 		post.UpdatedAt = time.Now()
 		return s.posts.Update(post)
@@ -139,6 +163,9 @@ func (s *reviewService) rejectTarget(targetType string, targetID uint) error {
 				return nil
 			}
 			return err
+		}
+		if comment.Status != constants.CommentStatusPending {
+			return nil
 		}
 		comment.Status = constants.CommentStatusRejected
 		comment.UpdatedAt = time.Now()

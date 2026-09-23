@@ -29,7 +29,7 @@ client.interceptors.response.use(
   },
 )
 
-export async function request<T>(method: 'get' | 'post' | 'delete', url: string, data?: unknown): Promise<T> {
+export async function request<T>(method: 'get' | 'post' | 'put' | 'delete', url: string, data?: unknown): Promise<T> {
   const response = await client.request<ApiResponse<T>>({
     method,
     url,

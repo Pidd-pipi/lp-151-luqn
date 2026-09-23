@@ -12,6 +12,7 @@ type LikeRepository interface {
 	Create(like *model.Like) error
 	Find(identityID uint, targetType string, targetID uint) (*model.Like, error)
 	Delete(id uint) error
+	DeleteByTargets(targetType string, targetIDs []uint) error
 	CountByTarget(targetType string, targetID uint) (int64, error)
 	IsLiked(identityID uint, targetType string, targetIDs []uint) (map[uint]bool, error)
 }
@@ -45,6 +46,17 @@ func (r *likeRepository) Find(identityID uint, targetType string, targetID uint)
 func (r *likeRepository) Delete(id uint) error {
 	if err := r.db.Delete(&model.Like{}, id).Error; err != nil {
 		return fmt.Errorf("delete like: %w", err)
+	}
+	return nil
+}
+
+// DeleteByTargets 批量删除某类目标上的所有点赞，用于内容撤回时一并清理。
+func (r *likeRepository) DeleteByTargets(targetType string, targetIDs []uint) error {
+	if len(targetIDs) == 0 {
+		return nil
+	}
+	if err := r.db.Where("target_type = ? AND target_id IN ?", targetType, targetIDs).Delete(&model.Like{}).Error; err != nil {
+		return fmt.Errorf("delete likes by targets: %w", err)
 	}
 	return nil
 }

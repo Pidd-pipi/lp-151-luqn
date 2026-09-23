@@ -16,6 +16,9 @@ type TagService interface {
 	List() ([]model.Tag, error)
 	FindByID(id uint) (*model.Tag, error)
 	IncCount(id uint) error
+	DecCount(id uint) error
+	LinkPost(postID, tagID uint) error
+	UnlinkPost(postID, tagID uint) error
 }
 
 type tagService struct {
@@ -63,4 +66,16 @@ func (s *tagService) FindByID(id uint) (*model.Tag, error) {
 
 func (s *tagService) IncCount(id uint) error {
 	return s.repo.IncrementPostCount(id)
+}
+
+func (s *tagService) DecCount(id uint) error {
+	return s.repo.DecrementPostCount(id)
+}
+
+func (s *tagService) LinkPost(postID, tagID uint) error {
+	return s.repo.LinkPostTag(postID, tagID)
+}
+
+func (s *tagService) UnlinkPost(postID, tagID uint) error {
+	return s.repo.UnlinkPostTag(postID, tagID)
 }

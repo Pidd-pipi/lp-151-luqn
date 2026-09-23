@@ -16,10 +16,12 @@ const (
 	PostStatusPublished = 1
 	PostStatusPending   = 2
 	PostStatusRejected  = 3
+	PostStatusWithdrawn = 4
 
 	CommentStatusPublished = 1
 	CommentStatusPending   = 2
 	CommentStatusRejected  = 3
+	CommentStatusWithdrawn = 4
 
 	ReviewStatusPending  = 1
 	ReviewStatusApproved = 2

@@ -89,7 +89,7 @@ paths:
           description: 帖子数组
   /api/v1/posts/{id}:
     get:
-      summary: 帖子详情
+      summary: 帖子详情（待审/未通过仅作者可见，已撤回返回 404）
       parameters:
         - in: path
           name: id
@@ -98,6 +98,45 @@ paths:
       responses:
         '200':
           description: 帖子详情
+    put:
+      summary: 编辑帖子（仅作者，内容重新检测敏感词，命中转入审核）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                title: { type: string }
+                content: { type: string }
+                images: { type: array, items: { type: string } }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: 帖子与命中信息
+        '403':
+          description: 非作者
+        '404':
+          description: 帖子不存在
+    delete:
+      summary: 撤回帖子（仅作者，评论/点赞/标签关系一并撤下）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: ok
+        '403':
+          description: 非作者
+        '404':
+          description: 帖子不存在
   /api/v1/posts/{id}/comments:
     get:
       summary: 帖子评论列表
@@ -130,6 +169,43 @@ paths:
       responses:
         '200':
           description: 评论与命中信息
+  /api/v1/comments/{id}:
+    put:
+      summary: 编辑评论（仅作者，内容重新检测敏感词，命中转入审核）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        '200':
+          description: 评论与命中信息
+        '403':
+          description: 非作者
+        '404':
+          description: 评论不存在
+    delete:
+      summary: 撤回评论（仅作者，帖子评论数同步减少）
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: ok
+        '403':
+          description: 非作者
+        '404':
+          description: 评论不存在
   /api/v1/tags:
     get:
       summary: 标签列表

@@ -37,6 +37,7 @@ export interface Comment {
   nickname: string
   avatar: string
   content: string
+  status: number
   likeCount: number
   liked: boolean
   createdAt: string

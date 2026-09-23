@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -46,6 +47,67 @@ func (h *CommentHandler) CreateComment(c *gin.Context) {
 	OK(c, gin.H{"comment": toCommentResponse(comment, false), "blocked": blocked, "hitWords": hits})
 }
 
+// UpdateComment 编辑自己的评论
+// @Summary 编辑评论（仅作者）
+// @Tags comment
+// @Accept json
+// @Produce json
+// @Param id path int true "评论ID"
+// @Param request body dto.UpdateCommentRequest true "评论内容"
+// @Success 200 {object} Response
+// @Router /api/v1/comments/{id} [put]
+func (h *CommentHandler) UpdateComment(c *gin.Context) {
+	id := parseID(c)
+	if id == 0 {
+		return
+	}
+	identityID := c.GetUint("identityId")
+	var req dto.UpdateCommentRequest
+	if !BindAndValidate(c, &req) {
+		return
+	}
+	comment, hits, blocked, err := h.comments.Update(identityID, id, req.Content)
+	if err != nil {
+		h.writeCommentManageError(c, err, "update comment")
+		return
+	}
+	OK(c, gin.H{"comment": toCommentResponse(comment, false), "blocked": blocked, "hitWords": hits})
+}
+
+// WithdrawComment 撤回自己的评论
+// @Summary 撤回评论（仅作者）
+// @Tags comment
+// @Produce json
+// @Param id path int true "评论ID"
+// @Success 200 {object} Response
+// @Router /api/v1/comments/{id} [delete]
+func (h *CommentHandler) WithdrawComment(c *gin.Context) {
+	id := parseID(c)
+	if id == 0 {
+		return
+	}
+	if err := h.comments.Withdraw(c.GetUint("identityId"), id); err != nil {
+		h.writeCommentManageError(c, err, "withdraw comment")
+		return
+	}
+	OK(c, nil)
+}
+
+// writeCommentManageError 将编辑/撤回的业务错误映射为标准响应。
+func (h *CommentHandler) writeCommentManageError(c *gin.Context, err error, op string) {
+	switch {
+	case errors.Is(err, service.ErrCommentNotFound):
+		Fail(c, http.StatusNotFound, constants.CodeNotFound, "comment not found")
+	case errors.Is(err, service.ErrForbidden):
+		Fail(c, http.StatusForbidden, constants.CodeForbidden, "只能操作自己的评论")
+	case errors.Is(err, service.ErrCommentWithdrawn):
+		Fail(c, http.StatusConflict, constants.CodeConflict, "comment already withdrawn")
+	default:
+		h.logger.Error(op, "error", err)
+		Fail(c, http.StatusInternalServerError, constants.CodeInternal, op+" failed")
+	}
+}
+
 // ListComments 帖子评论列表
 // @Summary 评论列表
 // @Tags comment
@@ -70,7 +132,7 @@ func (h *CommentHandler) ListComments(c *gin.Context) {
 	if req.PageSize == 0 {
 		req.PageSize = 20
 	}
-	comments, total, err := h.comments.ListByPostID(postID, req.Page, req.PageSize)
+	comments, total, err := h.comments.ListByPostID(postID, req.Page, req.PageSize, c.GetUint("identityId"))
 	if err != nil {
 		h.logger.Error("list comments", "error", err)
 		Fail(c, http.StatusInternalServerError, constants.CodeInternal, "list comments failed")
@@ -99,6 +161,7 @@ func toCommentResponse(comment *model.Comment, liked bool) dto.CommentResponse {
 		PostID:     comment.PostID,
 		IdentityID: comment.IdentityID,
 		Content:    comment.Content,
+		Status:     comment.Status,
 		LikeCount:  comment.LikeCount,
 		Liked:      liked,
 		CreatedAt:  comment.CreatedAt.Format(time.RFC3339),
