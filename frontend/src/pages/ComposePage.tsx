@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, Form, Input, Select, Button, message, Alert, Space } from 'antd'
+import { Card, Form, Input, Select, Button, message, Space } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { request } from '../api/client'
 import type { Tag } from '../types'
@@ -8,7 +8,6 @@ import { getIdentity } from '../utils/storage'
 export default function ComposePage() {
   const navigate = useNavigate()
   const [tags, setTags] = useState<Tag[]>([])
-  const [blockedInfo, setBlockedInfo] = useState<string | null>(null)
   const [form] = Form.useForm()
 
   useEffect(() => {
@@ -21,18 +20,18 @@ export default function ComposePage() {
       return
     }
     try {
-      const data = await request<{ post: unknown; blocked: boolean; hitWords: string[] }>('post', '/posts', {
+      const data = await request<{ post: { id: number }; blocked: boolean; hitWords: string[] }>('post', '/posts', {
         title: values.title || '',
         content: values.content,
         images: values.images || [],
         tags: values.tags || [],
       })
       if (data.blocked) {
-        setBlockedInfo(`内容命中敏感词：${data.hitWords.join('、')}，已进入审核队列`)
+        message.warning(`内容命中敏感词：${data.hitWords.join('、')}，已进入审核队列，仅你自己可见`)
       } else {
         message.success('发布成功')
-        navigate('/')
       }
+      navigate(`/posts/${data.post.id}`)
     } catch (e) {
       message.error((e as Error).message)
     }
@@ -53,7 +52,6 @@ export default function ComposePage() {
         <Form.Item name="images" label="图片链接">
           <Select mode="tags" placeholder="粘贴图片 URL 后回车，最多 9 张" />
         </Form.Item>
-        {blockedInfo && <Alert type="warning" message={blockedInfo} style={{ marginBottom: 16 }} showIcon />}
         <Space>
           <Button type="primary" htmlType="submit">发布</Button>
           <Button onClick={() => navigate('/')}>取消</Button>

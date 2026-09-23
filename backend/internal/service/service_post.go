@@ -12,25 +12,34 @@ import (
 	"github.com/gbtreehole/backend/internal/repository"
 )
 
-var ErrPostNotFound = errors.New("post not found")
+var (
+	ErrPostNotFound       = errors.New("post not found")
+	ErrPostNotVisible     = errors.New("post not visible")
+	ErrOperationForbidden = errors.New("operation forbidden")
+	ErrPostAlreadyDeleted = errors.New("post already withdrawn")
+)
 
 type PostService interface {
 	Create(identityID uint, title, content string, images []string, tagNames []string) (*model.Post, []string, bool, error)
-	GetByID(id uint) (*model.Post, error)
+	GetVisibleByID(id, viewerID uint) (*model.Post, error)
 	List(page, pageSize int, tagID uint, featured bool) ([]model.Post, int64, error)
 	ListHot(limit int) ([]model.Post, error)
 	ListFeatured(limit int) ([]model.Post, error)
 	DailyFeatured(limit int) ([]model.Post, error)
 	IncrementView(id uint) error
 	SetFeatured(id uint, featured bool) error
+	// Update 作者编辑帖子，重新检测敏感词，命中则转入审核。
+	Update(identityID, id uint, title, content string, images []string) (*model.Post, []string, bool, error)
+	// Withdraw 作者撤回帖子，级联撤下评论、点赞与标签关系。
+	Withdraw(identityID, id uint) error
 }
 
 type postService struct {
-	posts  repository.PostRepository
-	tags   TagService
+	posts     repository.PostRepository
+	tags      TagService
 	sensitive SensitiveWordService
-	review ReviewService
-	logger *slog.Logger
+	review    ReviewService
+	logger    *slog.Logger
 }
 
 func NewPostService(posts repository.PostRepository, tags TagService, sensitive SensitiveWordService, review ReviewService, logger *slog.Logger) PostService {
@@ -84,13 +93,21 @@ func (s *postService) Create(identityID uint, title, content string, images []st
 	return post, hits, blocked, nil
 }
 
-func (s *postService) GetByID(id uint) (*model.Post, error) {
+// GetVisibleByID 详情可见性：撤回帖对所有人不可见；
+// 审核中/被屏蔽的帖子仅作者本人可见。
+func (s *postService) GetVisibleByID(id, viewerID uint) (*model.Post, error) {
 	post, err := s.posts.FindByID(id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrPostNotFound
 		}
 		return nil, err
+	}
+	switch {
+	case post.Status == constants.PostStatusWithdrawn:
+		return nil, ErrPostNotVisible
+	case post.Status != constants.PostStatusPublished && post.IdentityID != viewerID:
+		return nil, ErrPostNotVisible
 	}
 	return post, nil
 }
@@ -158,4 +175,78 @@ func (s *postService) SetFeatured(id uint, featured bool) error {
 	}
 	post.UpdatedAt = time.Now()
 	return s.posts.Update(post)
+}
+
+// Update 编辑帖子：仅作者可操作；重新检测敏感词，
+// 命中则进入审核队列（沿用或新建审核单），未命中则恢复公开并取消旧审核单。
+func (s *postService) Update(identityID, id uint, title, content string, images []string) (*model.Post, []string, bool, error) {
+	post, err := s.posts.FindByID(id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, nil, false, ErrPostNotFound
+		}
+		return nil, nil, false, err
+	}
+	if post.IdentityID != identityID {
+		return nil, nil, false, ErrOperationForbidden
+	}
+	if post.Status == constants.PostStatusWithdrawn {
+		return nil, nil, false, ErrPostAlreadyDeleted
+	}
+
+	post.Title = title
+	post.Content = content
+	if len(images) > 0 {
+		imgBytes, err := json.Marshal(images)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("marshal images: %w", err)
+		}
+		post.Images = string(imgBytes)
+	} else {
+		post.Images = ""
+	}
+	post.UpdatedAt = time.Now()
+
+	hits, blocked := s.sensitive.Detect(title + " " + content)
+	if blocked {
+		post.Status = constants.PostStatusPending
+		if err := s.posts.Update(post); err != nil {
+			return nil, nil, false, err
+		}
+		if err := s.review.Resubmit("post", id, title+" "+content, hits); err != nil {
+			s.logger.Error("resubmit post review", "error", err)
+		}
+		return post, hits, true, nil
+	}
+
+	post.Status = constants.PostStatusPublished
+	post.ReviewRemark = ""
+	if err := s.posts.Update(post); err != nil {
+		return nil, nil, false, err
+	}
+	if err := s.review.CancelPending("post", id); err != nil {
+		s.logger.Error("cancel post review", "error", err)
+	}
+	return post, nil, false, nil
+}
+
+// Withdraw 撤回帖子：仅作者可操作，级联撤下相关数据。
+func (s *postService) Withdraw(identityID, id uint) error {
+	post, err := s.posts.FindByID(id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrPostNotFound
+		}
+		return err
+	}
+	if post.IdentityID != identityID {
+		return ErrOperationForbidden
+	}
+	if post.Status == constants.PostStatusWithdrawn {
+		return ErrPostAlreadyDeleted
+	}
+	if err := s.posts.WithdrawCascade(id); err != nil {
+		return err
+	}
+	return nil
 }

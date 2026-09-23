@@ -73,7 +73,14 @@ func (r *tagRepository) IncrementPostCount(id uint) error {
 }
 
 func (r *tagRepository) DecrementPostCount(id uint) error {
-	if err := r.db.Model(&model.Tag{}).Where("id = ?", id).UpdateColumn("post_count", gorm.Expr("GREATEST(post_count - 1, 0)")).Error; err != nil {
+	var tag model.Tag
+	if err := r.db.First(&tag, id).Error; err != nil {
+		return fmt.Errorf("find tag for post count: %w", err)
+	}
+	if tag.PostCount > 0 {
+		tag.PostCount--
+	}
+	if err := r.db.Model(&tag).UpdateColumn("post_count", tag.PostCount).Error; err != nil {
 		return fmt.Errorf("decrement tag post count: %w", err)
 	}
 	return nil

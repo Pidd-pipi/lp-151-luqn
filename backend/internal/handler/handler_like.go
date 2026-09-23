@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -36,8 +37,15 @@ func (h *LikeHandler) ToggleLike(c *gin.Context) {
 	}
 	liked, count, err := h.likes.Toggle(identityID, req.TargetType, req.TargetID)
 	if err != nil {
-		h.logger.Error("toggle like", "error", err)
-		Fail(c, http.StatusInternalServerError, constants.CodeInternal, "toggle like failed")
+		switch {
+		case errors.Is(err, service.ErrPostNotFound) || errors.Is(err, service.ErrCommentNotFound):
+			Fail(c, http.StatusNotFound, constants.CodeNotFound, "target not found")
+		case errors.Is(err, service.ErrOperationForbidden):
+			Fail(c, http.StatusForbidden, constants.CodeForbidden, "operation forbidden")
+		default:
+			h.logger.Error("toggle like", "error", err)
+			Fail(c, http.StatusInternalServerError, constants.CodeInternal, "toggle like failed")
+		}
 		return
 	}
 	OK(c, dto.LikeResponse{Liked: liked, LikeCount: count})

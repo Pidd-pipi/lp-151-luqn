@@ -48,6 +48,8 @@ func New(
 			postGroup.GET("/hot", post.HotPosts)
 			postGroup.GET("/featured", post.FeaturedPosts)
 			postGroup.GET("/:id", post.GetPost)
+			postGroup.PUT("/:id", identityMW.RequireAuth(), post.UpdatePost)
+			postGroup.POST("/:id/withdraw", identityMW.RequireAuth(), post.WithdrawPost)
 			postGroup.GET("/:id/comments", comment.ListComments)
 		}
 
@@ -55,6 +57,8 @@ func New(
 		commentGroup.Use(identityMW.RequireAuth())
 		{
 			commentGroup.POST("", comment.CreateComment)
+			commentGroup.PUT("/:id", comment.UpdateComment)
+			commentGroup.POST("/:id/withdraw", comment.WithdrawComment)
 		}
 
 		tagGroup := api.Group("/tags")

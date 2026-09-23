@@ -18,11 +18,12 @@ import (
 type PostHandler struct {
 	posts  service.PostService
 	likes  service.LikeService
+	review service.ReviewService
 	logger *slog.Logger
 }
 
-func NewPostHandler(posts service.PostService, likes service.LikeService, logger *slog.Logger) *PostHandler {
-	return &PostHandler{posts: posts, likes: likes, logger: logger}
+func NewPostHandler(posts service.PostService, likes service.LikeService, review service.ReviewService, logger *slog.Logger) *PostHandler {
+	return &PostHandler{posts: posts, likes: likes, review: review, logger: logger}
 }
 
 // CreatePost 发布帖子
@@ -45,8 +46,9 @@ func (h *PostHandler) CreatePost(c *gin.Context) {
 		Fail(c, http.StatusInternalServerError, constants.CodeInternal, "create post failed")
 		return
 	}
-	resp := toPostResponse(post, false)
-	OK(c, gin.H{"post": resp, "blocked": blocked, "hitWords": hits})
+	items := []dto.PostResponse{toPostResponse(post, false)}
+	attachPostReviewInfo(items, nil, identityID, h.review)
+	OK(c, gin.H{"post": items[0], "blocked": blocked, "hitWords": hits})
 }
 
 // ListPosts 最新/标签/精选帖子列表
@@ -92,9 +94,10 @@ func (h *PostHandler) GetPost(c *gin.Context) {
 	if id == 0 {
 		return
 	}
-	post, err := h.posts.GetByID(id)
+	viewerID := c.GetUint("identityId")
+	post, err := h.posts.GetVisibleByID(id, viewerID)
 	if err != nil {
-		if errors.Is(err, service.ErrPostNotFound) {
+		if errors.Is(err, service.ErrPostNotFound) || errors.Is(err, service.ErrPostNotVisible) {
 			Fail(c, http.StatusNotFound, constants.CodeNotFound, "post not found")
 			return
 		}
@@ -103,8 +106,58 @@ func (h *PostHandler) GetPost(c *gin.Context) {
 		return
 	}
 	_ = h.posts.IncrementView(id)
-	resp := toPostResponse(post, c.GetUint("identityId") > 0 && h.isLiked(c.GetUint("identityId"), "post", id))
-	OK(c, resp)
+	items := []dto.PostResponse{toPostResponse(post, viewerID > 0 && h.isLiked(viewerID, "post", id))}
+	attachPostReviewInfo(items, nil, viewerID, h.review)
+	OK(c, items[0])
+}
+
+// UpdatePost 作者编辑帖子
+// @Summary 编辑帖子
+// @Tags post
+// @Accept json
+// @Produce json
+// @Param id path int true "帖子ID"
+// @Param request body dto.UpdatePostRequest true "编辑内容"
+// @Success 200 {object} Response
+// @Router /api/v1/posts/{id} [put]
+func (h *PostHandler) UpdatePost(c *gin.Context) {
+	identityID := c.GetUint("identityId")
+	id := parseID(c)
+	if id == 0 {
+		return
+	}
+	var req dto.UpdatePostRequest
+	if !BindAndValidate(c, &req) {
+		return
+	}
+	post, hits, blocked, err := h.posts.Update(identityID, id, req.Title, req.Content, req.Images)
+	if err != nil {
+		h.writePostError(c, "update post", err)
+		return
+	}
+	items := []dto.PostResponse{toPostResponse(post, h.isLiked(identityID, "post", id))}
+	attachPostReviewInfo(items, nil, identityID, h.review)
+	OK(c, gin.H{"post": items[0], "blocked": blocked, "hitWords": hits})
+}
+
+// WithdrawPost 作者撤回帖子
+// @Summary 撤回帖子
+// @Tags post
+// @Produce json
+// @Param id path int true "帖子ID"
+// @Success 200 {object} Response
+// @Router /api/v1/posts/{id}/withdraw [post]
+func (h *PostHandler) WithdrawPost(c *gin.Context) {
+	identityID := c.GetUint("identityId")
+	id := parseID(c)
+	if id == 0 {
+		return
+	}
+	if err := h.posts.Withdraw(identityID, id); err != nil {
+		h.writePostError(c, "withdraw post", err)
+		return
+	}
+	OK(c, gin.H{"id": id, "status": constants.PostStatusWithdrawn})
 }
 
 // HotPosts 热门帖子
@@ -139,10 +192,26 @@ func (h *PostHandler) FeaturedPosts(c *gin.Context) {
 	OK(c, h.buildPostResponses(posts, c.GetUint("identityId")))
 }
 
+func (h *PostHandler) writePostError(c *gin.Context, action string, err error) {
+	switch {
+	case errors.Is(err, service.ErrPostNotFound) || errors.Is(err, service.ErrPostAlreadyDeleted):
+		Fail(c, http.StatusNotFound, constants.CodeNotFound, "post not found")
+	case errors.Is(err, service.ErrOperationForbidden):
+		Fail(c, http.StatusForbidden, constants.CodeForbidden, "operation forbidden")
+	default:
+		h.logger.Error(action, "error", err)
+		Fail(c, http.StatusInternalServerError, constants.CodeInternal, action+" failed")
+	}
+}
+
 func (h *PostHandler) buildPostResponses(posts []model.Post, identityID uint) []dto.PostResponse {
 	ids := make([]uint, 0, len(posts))
+	owned := make(map[uint]bool, len(posts))
 	for _, p := range posts {
 		ids = append(ids, p.ID)
+		if p.IdentityID == identityID {
+			owned[p.ID] = true
+		}
 	}
 	likedMap := map[uint]bool{}
 	if identityID > 0 {
@@ -154,6 +223,7 @@ func (h *PostHandler) buildPostResponses(posts []model.Post, identityID uint) []
 	for _, p := range posts {
 		items = append(items, toPostResponse(&p, likedMap[p.ID]))
 	}
+	attachPostReviewInfo(items, owned, identityID, h.review)
 	return items
 }
 
@@ -163,6 +233,38 @@ func (h *PostHandler) isLiked(identityID uint, targetType string, targetID uint)
 		return false
 	}
 	return m[targetID]
+}
+
+// attachPostReviewInfo 仅向作者本人的帖子附加审核处理状态。
+func attachPostReviewInfo(items []dto.PostResponse, owned map[uint]bool, identityID uint, review service.ReviewService) {
+	if identityID == 0 || len(items) == 0 {
+		return
+	}
+	ids := make([]uint, 0, len(items))
+	for _, item := range items {
+		if owned == nil || owned[item.ID] {
+			ids = append(ids, item.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	latest, err := review.LatestReviews("post", ids)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		if owned != nil && !owned[items[i].ID] {
+			continue
+		}
+		item := latest[items[i].ID]
+		if item.ID == 0 {
+			continue
+		}
+		items[i].ReviewStatus = item.Status
+		items[i].ReviewNote = item.ReviewNote
+		items[i].HitWords = item.HitWords
+	}
 }
 
 func toPostResponse(post *model.Post, liked bool) dto.PostResponse {
@@ -178,6 +280,7 @@ func toPostResponse(post *model.Post, liked bool) dto.PostResponse {
 		IsFeatured:   post.IsFeatured,
 		Liked:        liked,
 		CreatedAt:    post.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:    post.UpdatedAt.Format(time.RFC3339),
 	}
 	if post.Identity != nil {
 		resp.Nickname = post.Identity.Nickname

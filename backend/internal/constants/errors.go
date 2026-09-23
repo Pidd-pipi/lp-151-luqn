@@ -16,14 +16,17 @@ const (
 	PostStatusPublished = 1
 	PostStatusPending   = 2
 	PostStatusRejected  = 3
+	PostStatusWithdrawn = 4
 
 	CommentStatusPublished = 1
 	CommentStatusPending   = 2
 	CommentStatusRejected  = 3
+	CommentStatusWithdrawn = 4
 
 	ReviewStatusPending  = 1
 	ReviewStatusApproved = 2
 	ReviewStatusRejected = 3
+	ReviewStatusCanceled = 4
 )
 
 // 热度计算公式常量

@@ -5,6 +5,7 @@ import (
 
 	"log/slog"
 
+	"github.com/gbtreehole/backend/internal/constants"
 	"github.com/gbtreehole/backend/internal/model"
 	"github.com/gbtreehole/backend/internal/repository"
 )
@@ -26,6 +27,9 @@ func NewLikeService(likes repository.LikeRepository, posts repository.PostReposi
 }
 
 func (s *likeService) Toggle(identityID uint, targetType string, targetID uint) (bool, int64, error) {
+	if err := s.ensureTargetVisible(targetType, targetID); err != nil {
+		return false, 0, err
+	}
 	existing, err := s.likes.Find(identityID, targetType, targetID)
 	if err == nil {
 		if err := s.likes.Delete(existing.ID); err != nil {
@@ -83,4 +87,36 @@ func (s *likeService) adjustCount(targetType string, targetID uint, delta int) {
 
 func (s *likeService) IsLiked(identityID uint, targetType string, targetIDs []uint) (map[uint]bool, error) {
 	return s.likes.IsLiked(identityID, targetType, targetIDs)
+}
+
+// ensureTargetVisible 仅公开状态的帖子/评论允许点赞，
+// 撤回、审核中或被屏蔽的内容拒绝操作。
+func (s *likeService) ensureTargetVisible(targetType string, targetID uint) error {
+	switch targetType {
+	case "post":
+		post, err := s.posts.FindByID(targetID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrPostNotFound
+			}
+			return err
+		}
+		if post.Status != constants.PostStatusPublished {
+			return ErrOperationForbidden
+		}
+	case "comment":
+		comment, err := s.comments.FindByID(targetID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrCommentNotFound
+			}
+			return err
+		}
+		if comment.Status != constants.CommentStatusPublished {
+			return ErrOperationForbidden
+		}
+	default:
+		return ErrOperationForbidden
+	}
+	return nil
 }

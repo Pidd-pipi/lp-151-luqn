@@ -72,8 +72,8 @@ func main() {
 
 	// Handlers
 	authHandler := handler.NewAuthHandler(identityService, logger)
-	postHandler := handler.NewPostHandler(postService, likeService, logger)
-	commentHandler := handler.NewCommentHandler(commentService, likeService, logger)
+	postHandler := handler.NewPostHandler(postService, likeService, reviewService, logger)
+	commentHandler := handler.NewCommentHandler(commentService, likeService, reviewService, logger)
 	tagHandler := handler.NewTagHandler(tagService, logger)
 	likeHandler := handler.NewLikeHandler(likeService, logger)
 	adminHandler := handler.NewAdminHandler(reviewService, postService, sensitiveService, tagService, logger)
